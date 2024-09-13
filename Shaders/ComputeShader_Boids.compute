@@ -1,0 +1,103 @@
+#pragma kernel main
+
+// Número de agentes será enviado pelo script Unity
+#define NUM_AGENTS 100
+
+// Buffer de entrada de posições
+RWStructuredBuffer<float4> PositionBuffer;
+RWStructuredBuffer<float4> VelocityBuffer;
+
+// Buffer de saída de posições e velocidades
+RWStructuredBuffer<float4> NewPositionBuffer;
+RWStructuredBuffer<float4> NewVelocityBuffer;
+
+// Parâmetros da simulação
+float separationRadius;
+float alignmentRadius;
+float cohesionRadius;
+float curiosityFactor;
+float3 pivotPosition;
+
+// Função para calcular força de separação
+float3 computeSeparation(float3 position, float radius) {
+    float3 force = float3(0.0, 0.0, 0.0);
+    for (int i = 0; i < NUM_AGENTS; i++) {
+        float3 otherPosition = PositionBuffer[i].xyz;
+        float3 diff = position - otherPosition;
+        float distance = length(diff);
+        if (distance > 0.0 && distance < radius) {
+            force += normalize(diff) / distance;
+        }
+    }
+    return force;
+}
+
+// Função para calcular força de alinhamento
+float3 computeAlignment(float3 velocity, float3 position, float radius) {
+    float3 force = float3(0.0, 0.0, 0.0);
+    int count = 0;
+    for (int i = 0; i < NUM_AGENTS; i++) {
+        float3 otherPosition = PositionBuffer[i].xyz;
+        float3 otherVelocity = VelocityBuffer[i].xyz;
+        float3 diff = position - otherPosition;
+        float distance = length(diff);
+        if (distance > 0.0 && distance < radius) {
+            force += otherVelocity;
+            count++;
+        }
+    }
+    if (count > 0) {
+        force /= count;
+        force = normalize(force);
+    }
+    return force;
+}
+
+// Função para calcular força de coesão
+float3 computeCohesion(float3 position, float radius) {
+    float3 force = float3(0.0, 0.0, 0.0);
+    int count = 0;
+    for (int i = 0; i < NUM_AGENTS; i++) {
+        float3 otherPosition = PositionBuffer[i].xyz;
+        float3 diff = position - otherPosition;
+        float distance = length(diff);
+        if (distance > 0.0 && distance < radius) {
+            force += otherPosition;
+            count++;
+        }
+    }
+    if (count > 0) {
+        force /= count;
+        force = normalize(force - position);
+    }
+    return force;
+}
+
+// Função principal do compute shader
+[numthreads(256, 1, 1)] // Define o número de threads por grupo de execução
+void main(uint3 id : SV_DispatchThreadID) {
+    uint idx = id.x; // Identificador único da thread (agente)
+    
+    if (idx >= NUM_AGENTS) return; // Limitar ao número de agentes
+
+    float3 position = PositionBuffer[idx].xyz;
+    float3 velocity = VelocityBuffer[idx].xyz;
+
+    // Calculando forças
+    float3 separation = computeSeparation(position, separationRadius);
+    float3 alignment = computeAlignment(velocity, position, alignmentRadius);
+    float3 cohesion = computeCohesion(position, cohesionRadius);
+
+    // Aplicando curiosidade
+    float3 direction = normalize(pivotPosition - position);
+    float3 curiosity = lerp(velocity, direction, curiosityFactor);
+
+    // Atualizando velocidade e posição
+    float3 newVelocity = velocity + separation + alignment + cohesion + curiosity;
+    newVelocity = normalize(newVelocity) * length(velocity);
+    float3 newPosition = position + newVelocity;
+
+    // Armazenar novos valores nos buffers de saída
+    NewVelocityBuffer[idx] = float4(newVelocity, 1.0);
+    NewPositionBuffer[idx] = float4(newPosition, 1.0);
+}

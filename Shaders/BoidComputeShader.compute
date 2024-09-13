@@ -1,0 +1,59 @@
+#pragma kernel CSMain
+
+// Dados de entrada e saída
+RWStructuredBuffer<float4> boidPositions;
+RWStructuredBuffer<float4> boidVelocities;
+float3 pivotPosition;
+float separationDistance;
+float alignmentDistance;
+float cohesionDistance;
+
+[numthreads(256, 1, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+    float3 position = boidPositions[id.x].xyz;
+    float3 velocity = boidVelocities[id.x].xyz;
+    float3 separation = float3(0, 0, 0);
+    float3 alignment = float3(0, 0, 0);
+    float3 cohesion = float3(0, 0, 0);
+
+    int neighborCount = 0;
+
+    for (uint i = 0; i < boidPositions.Length; i++)
+    {
+        if (i != id.x)
+        {
+            float3 neighborPosition = boidPositions[i].xyz;
+            float3 neighborVelocity = boidVelocities[i].xyz;
+            float3 diff = position - neighborPosition;
+            float dist = length(diff);
+
+            if (dist < separationDistance)
+            {
+                separation += diff / (dist * dist); // Ajustado para suavizar a força de separação
+            }
+
+            if (dist < alignmentDistance)
+            {
+                alignment += neighborVelocity;
+                neighborCount++;
+            }
+
+            if (dist < cohesionDistance)
+            {
+                cohesion += neighborPosition;
+            }
+        }
+    }
+
+    if (neighborCount > 0)
+    {
+        alignment /= neighborCount;
+        cohesion = (cohesion / neighborCount - position);
+    }
+
+    // Atualizar a velocidade e a posição
+    float3 newVelocity = velocity + separation + alignment + cohesion;
+    boidVelocities[id.x] = float4(newVelocity, 0);
+    boidPositions[id.x] = float4(position + newVelocity * 0.1f, 0);  // Atualizar a posição
+}
